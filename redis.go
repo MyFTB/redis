@@ -18,12 +18,12 @@ var (
 )
 
 // NewRedisStore create an instance of a redis store
-func NewRedisStore(opts *Options, prefix ...string) session.ManagerStore {
+func NewRedisStore(opts *redis.Options, prefix ...string) session.ManagerStore {
 	if opts == nil {
 		panic("options cannot be nil")
 	}
 	return NewRedisStoreWithCli(
-		redis.NewClient(opts.redisOptions()),
+		redis.NewClient(opts),
 		prefix...,
 	)
 }
@@ -31,7 +31,7 @@ func NewRedisStore(opts *Options, prefix ...string) session.ManagerStore {
 // NewRedisStoreWithCli create an instance of a redis store
 func NewRedisStoreWithCli(cli *redis.Client, prefix ...string) session.ManagerStore {
 	store := &managerStore{
-		cli: cli,
+		cli: newClient(cli),
 	}
 	if len(prefix) > 0 {
 		store.prefix = prefix[0]
@@ -40,12 +40,12 @@ func NewRedisStoreWithCli(cli *redis.Client, prefix ...string) session.ManagerSt
 }
 
 // NewRedisClusterStore create an instance of a redis cluster store
-func NewRedisClusterStore(opts *ClusterOptions, prefix ...string) session.ManagerStore {
+func NewRedisClusterStore(opts *redis.ClusterOptions, prefix ...string) session.ManagerStore {
 	if opts == nil {
 		panic("options cannot be nil")
 	}
 	return NewRedisClusterStoreWithCli(
-		redis.NewClusterClient(opts.redisClusterOptions()),
+		redis.NewClusterClient(opts),
 		prefix...,
 	)
 }
@@ -53,22 +53,12 @@ func NewRedisClusterStore(opts *ClusterOptions, prefix ...string) session.Manage
 // NewRedisClusterStoreWithCli create an instance of a redis cluster store
 func NewRedisClusterStoreWithCli(cli *redis.ClusterClient, prefix ...string) session.ManagerStore {
 	store := &managerStore{
-		cli: cli,
+		cli: newClusterClient(cli),
 	}
 	if len(prefix) > 0 {
 		store.prefix = prefix[0]
 	}
 	return store
-}
-
-type clienter interface {
-	Get(key string) *redis.StringCmd
-	Set(key string, value interface{}, expiration time.Duration) *redis.StatusCmd
-	Expire(key string, expiration time.Duration) *redis.BoolCmd
-	Exists(keys ...string) *redis.IntCmd
-	TxPipeline() redis.Pipeliner
-	Del(keys ...string) *redis.IntCmd
-	Close() error
 }
 
 type managerStore struct {
@@ -156,9 +146,9 @@ func (s *managerStore) Refresh(ctx context.Context, oldsid, sid string, expired 
 	}
 
 	pipe := s.cli.TxPipeline()
-	pipe.Set(s.getKey(sid), value, time.Duration(expired)*time.Second)
-	pipe.Del(s.getKey(oldsid))
-	_, err = pipe.Exec()
+	pipe.Set(ctx, s.getKey(sid), value, time.Duration(expired)*time.Second)
+	pipe.Del(ctx, s.getKey(oldsid))
+	_, err = pipe.Exec(ctx)
 	if err != nil {
 		return nil, err
 	}
